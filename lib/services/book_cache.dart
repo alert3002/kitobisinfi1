@@ -106,6 +106,47 @@ class BookCache {
     );
   }
 
+  static String formatBytes(int bytes) {
+    final mb = bytes / (1024 * 1024);
+    if (mb < 0.1) return '${(bytes / 1024).ceil()} КБ';
+    return '${mb.toStringAsFixed(1)} МБ';
+  }
+
+  Future<int?> probePdfBytes(BookItem book) async {
+    var url = book.remotePdfUrl;
+    if (url == null || url.isEmpty) return null;
+    url = _https(url);
+    try {
+      final res = await _dio.head(
+        url,
+        options: Options(
+          followRedirects: true,
+          validateStatus: (status) => status != null && status < 500,
+        ),
+      );
+      final len = res.headers.value('content-length');
+      final parsed = len == null ? null : int.tryParse(len);
+      if (parsed != null && parsed > 0) return parsed;
+    } catch (_) {}
+    try {
+      final res = await _dio.get<List<int>>(
+        url,
+        options: Options(
+          followRedirects: true,
+          headers: const {'Range': 'bytes=0-0'},
+          responseType: ResponseType.bytes,
+          validateStatus: (status) => status != null && status < 500,
+        ),
+      );
+      final range = res.headers.value('content-range');
+      final match = range == null
+          ? null
+          : RegExp(r'/(\d+)\s*$').firstMatch(range);
+      if (match != null) return int.tryParse(match.group(1)!);
+    } catch (_) {}
+    return null;
+  }
+
   Future<BookItem> ensurePdf(BookItem book) async {
     final existing = await pdfPath(book.id);
     if (existing != null) {

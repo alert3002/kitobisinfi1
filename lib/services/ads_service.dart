@@ -40,9 +40,11 @@ class AdsService extends ChangeNotifier {
     try {
       await MobileAds.instance.initialize();
       await refresh();
-      final last = ProgressService.instance.lastInterstitialAt;
-      if (last == null) {
-        await ProgressService.instance.markInterstitialShown();
+      if (!kDebugMode) {
+        final last = ProgressService.instance.lastInterstitialAt;
+        if (last == null) {
+          await ProgressService.instance.markInterstitialShown();
+        }
       }
     } catch (e) {
       debugPrint('Ads init: $e');
@@ -66,6 +68,9 @@ class AdsService extends ChangeNotifier {
     notifyListeners();
   }
 
+  Duration get _interstitialInterval =>
+      kDebugMode ? Duration.zero : kInterstitialInterval;
+
   Future<void> refresh() async {
     if (!isMobileAdsPlatform) return;
     _ids = await _api.fetchAds(android: Platform.isAndroid);
@@ -83,7 +88,7 @@ class AdsService extends ChangeNotifier {
     if (!interstitialEnabled) return;
     final last = ProgressService.instance.lastInterstitialAt;
     if (last != null &&
-        DateTime.now().difference(last) < kInterstitialInterval) {
+        DateTime.now().difference(last) < _interstitialInterval) {
       return;
     }
     final ad = _interstitial;

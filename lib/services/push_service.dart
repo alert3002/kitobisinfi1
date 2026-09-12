@@ -31,20 +31,27 @@ class PushService {
       return;
     }
 
-    FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
-
-    final messaging = FirebaseMessaging.instance;
-    await messaging.requestPermission(alert: true, badge: true, sound: true);
-    if (Platform.isIOS) {
-      await messaging.setForegroundNotificationPresentationOptions(
-        alert: true,
-        badge: true,
-        sound: true,
-      );
+    try {
+      FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+    } catch (e) {
+      debugPrint('FCM background handler: $e');
     }
 
-    await messaging.subscribeToTopic('kitobho_all');
-    await messaging.subscribeToTopic('kitobho_grade_$kGrade');
+    final messaging = FirebaseMessaging.instance;
+    try {
+      await messaging.requestPermission(alert: true, badge: true, sound: true);
+      if (Platform.isIOS) {
+        await messaging.setForegroundNotificationPresentationOptions(
+          alert: true,
+          badge: true,
+          sound: true,
+        );
+      }
+      await messaging.subscribeToTopic('kitobho_all');
+      await messaging.subscribeToTopic('kitobho_grade_$kGrade');
+    } catch (e) {
+      debugPrint('FCM permission/topics: $e');
+    }
 
     FirebaseMessaging.onMessage.listen((message) {
       unawaited(NoticesService.instance.refresh());

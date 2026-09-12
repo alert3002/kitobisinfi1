@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../models/book.dart';
 import '../services/book_cache.dart';
+import '../services/progress_service.dart';
 import '../theme/app_theme.dart';
 
 class BookCover extends StatelessWidget {
@@ -66,11 +67,13 @@ class BookCard extends StatelessWidget {
     required this.book,
     required this.page,
     required this.onOpen,
+    this.onFavorite,
   });
 
   final BookItem book;
   final int page;
   final VoidCallback onOpen;
+  final VoidCallback? onFavorite;
 
   @override
   Widget build(BuildContext context) {
@@ -101,6 +104,28 @@ class BookCard extends StatelessWidget {
                     fit: StackFit.expand,
                     children: [
                       BookCover(book: book, cacheWidth: cacheW),
+                      Positioned(
+                        top: 4,
+                        left: 4,
+                        child: Material(
+                          color: Colors.white.withValues(alpha: 0.9),
+                          shape: const CircleBorder(),
+                          child: InkWell(
+                            customBorder: const CircleBorder(),
+                            onTap: onFavorite,
+                            child: Padding(
+                              padding: const EdgeInsets.all(4),
+                              child: Icon(
+                                ProgressService.instance.isFavorite(book.id)
+                                    ? Icons.star_rounded
+                                    : Icons.star_border_rounded,
+                                size: 18,
+                                color: const Color(0xFFD4A017),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
                       ValueListenableBuilder<int>(
                         valueListenable: BookCache.instance.progressOf(book.id),
                         builder: (context, value, child) {
@@ -150,6 +175,19 @@ class BookCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 6),
+              if (ProgressService.instance.pageCountFor(book.id) > 0)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: ProgressService.instance.percentFor(book.id),
+                      minHeight: 4,
+                      backgroundColor: const Color(0xFFE8DDCC),
+                      color: AppTheme.teal,
+                    ),
+                  ),
+                ),
               Text(
                 book.title,
                 maxLines: 2,

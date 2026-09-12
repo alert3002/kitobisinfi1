@@ -36,6 +36,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String _query = '';
   bool _searchingPages = false;
   List<TextHit> _hits = const [];
+  _LibraryFilter _filter = _LibraryFilter.all;
 
   @override
   void initState() {
@@ -207,9 +208,41 @@ class _HomeScreenState extends State<HomeScreen> {
     await AdsService.instance.maybeShowInterstitial();
     if (!mounted) return;
     BookItem ready = book;
-    final needsDownload = BookCache.instance.isDownloading(book.id) ||
-        !await BookCache.instance.hasValidPdf(book.id);
+    final alreadyDownloading = BookCache.instance.isDownloading(book.id);
+    final needsDownload =
+        alreadyDownloading || !await BookCache.instance.hasValidPdf(book.id);
     if (needsDownload) {
+      if (!alreadyDownloading) {
+        final bytes = await BookCache.instance.probePdfBytes(book);
+        if (!mounted) return;
+        final sizeText = bytes == null
+            ? 'ҳаҷм пас аз оғоз маълум мешавад'
+            : BookCache.formatBytes(bytes);
+        final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Боргирии китоб'),
+            content: Text(
+              'Китоби «${book.title}» дар барнома нест. '
+              'Аввал файлро аз интернет боргирӣ кунед ($sizeText), '
+              'баъд бе интернет хондан мумкин аст.\n\n'
+              'Манбаъ: $kSourceUrl',
+              style: const TextStyle(height: 1.45),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Не'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Боргирӣ'),
+              ),
+            ],
+          ),
+        );
+        if (confirmed != true) return;
+      }
       var hidden = false;
       var dialogOpen = true;
 
@@ -359,6 +392,53 @@ class _HomeScreenState extends State<HomeScreen> {
     launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 
+  void _showNotes() {
+    Navigator.pop(context);
+    final catalog = CatalogService.instance;
+    final items = [
+      for (final book in catalog.books)
+        if (ProgressService.instance.noteFor(book.id).isNotEmpty)
+          (book: book, note: ProgressService.instance.noteFor(book.id)),
+    ];
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (context) {
+        if (items.isEmpty) {
+          return const Padding(
+            padding: EdgeInsets.fromLTRB(24, 8, 24, 32),
+            child: Text(
+              'Ҳанӯз ёддошт нест. Китобро кушоед ва аз меню «Ёддошт»-ро интихоб кунед.',
+              style: TextStyle(fontWeight: FontWeight.w700, height: 1.4),
+            ),
+          );
+        }
+        return ListView.separated(
+          shrinkWrap: true,
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+          itemCount: items.length,
+          separatorBuilder: (_, _) => const Divider(height: 1),
+          itemBuilder: (context, i) {
+            final item = items[i];
+            return ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(
+                item.book.title,
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+              subtitle: Text(item.note, maxLines: 3),
+              onTap: () {
+                Navigator.pop(context);
+                _open(item.book);
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+
   void _showAbout() {
     Navigator.pop(context);
     showDialog<void>(
@@ -383,6 +463,15 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
         actions: [
+          TextButton(
+            onPressed: () {
+              launchUrl(
+                Uri.parse(kSourceUrl),
+                mode: LaunchMode.externalApplication,
+              );
+            },
+            child: const Text('Манбаи китобҳо'),
+          ),
           TextButton(
             onPressed: () {
               launchUrl(
@@ -414,6 +503,19 @@ class _HomeScreenState extends State<HomeScreen> {
     final books = BookSearch.instance.booksByTitle(_query);
     final q = _query.trim();
     final searching = q.length >= 2;
+    var visible = books;
+    if (!searching) {
+      switch (_filter) {
+        case _LibraryFilter.all:
+          break;
+        case _LibraryFilter.offline:
+          visible = books.where((b) => b.hasLocalFile).toList();
+        case _LibraryFilter.favorites:
+          visible = books.where((b) => progress.isFavorite(b.id)).toList();
+        case _LibraryFilter.continueReading:
+          visible = books.where((b) => progress.pageFor(b.id) > 1).toList();
+      }
+    }
 
     return Scaffold(
       key: _scaffoldKey,
@@ -448,6 +550,29 @@ class _HomeScreenState extends State<HomeScreen> {
                   style: TextStyle(fontWeight: FontWeight.w800),
                 ),
                 onTap: _showAbout,
+              ),
+              ListTile(
+                leading: const Icon(Icons.public_rounded),
+                title: const Text(
+                  'Манбаи китобҳо',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+                subtitle: const Text('maorif.tj'),
+                onTap: () {
+                  Navigator.pop(context);
+                  launchUrl(
+                    Uri.parse(kSourceUrl),
+                    mode: LaunchMode.externalApplication,
+                  );
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.edit_note_rounded),
+                title: const Text(
+                  'Ёддоштҳои ман',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+                onTap: _showNotes,
               ),
               const Divider(),
               for (final grade in catalog.grades)
@@ -544,6 +669,51 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                 ),
+                if (!searching)
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          InkWell(
+                            onTap: () => launchUrl(
+                              Uri.parse(kSourceUrl),
+                              mode: LaunchMode.externalApplication,
+                            ),
+                            child: const Text(
+                              'Манбаъ: maorif.tj/libraries — барномаи расмии вазорат нест',
+                              style: TextStyle(
+                                fontSize: 12.5,
+                                height: 1.35,
+                                color: AppTheme.tealDark,
+                                fontWeight: FontWeight.w700,
+                                decoration: TextDecoration.underline,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child: Row(
+                              children: [
+                                for (final item in _LibraryFilter.values)
+                                  Padding(
+                                    padding: const EdgeInsets.only(right: 8),
+                                    child: ChoiceChip(
+                                      label: Text(item.label),
+                                      selected: _filter == item,
+                                      onSelected: (_) =>
+                                          setState(() => _filter = item),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 if (lastBook != null && !searching && catalog.books.isNotEmpty)
                   SliverToBoxAdapter(
                     child: _ContinueCard(
@@ -695,7 +865,29 @@ class _HomeScreenState extends State<HomeScreen> {
                               fontSize: 15,
                             ),
                           ),
+                          const SizedBox(height: 16),
+                          FilledButton(
+                            onPressed: _reload,
+                            child: const Text('Аз нав кӯшиш'),
+                          ),
                         ],
+                      ),
+                    ),
+                  )
+                else if (!searching && visible.isEmpty)
+                  const SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(32),
+                        child: Text(
+                          'Дар ин рӯйхат китоб нест. Филтри дигарро интихоб кунед.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 15,
+                          ),
+                        ),
                       ),
                     ),
                   )
@@ -712,14 +904,18 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     delegate: SliverChildBuilderDelegate(
                       (context, i) {
-                        final book = books[i];
+                        final book = visible[i];
                         return BookCard(
                           book: book,
                           page: progress.pageFor(book.id),
                           onOpen: () => _open(book),
+                          onFavorite: () async {
+                            await progress.toggleFavorite(book.id);
+                            if (mounted) setState(() {});
+                          },
                         );
                       },
-                      childCount: books.length,
+                      childCount: visible.length,
                     ),
                   ),
                 ),
@@ -732,6 +928,20 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
+}
+
+enum _LibraryFilter {
+  all,
+  offline,
+  favorites,
+  continueReading;
+
+  String get label => switch (this) {
+        all => 'Ҳама',
+        offline => 'Офлайн',
+        favorites => 'Дӯстдошта',
+        continueReading => 'Идома',
+      };
 }
 
 class _HighlightText extends StatelessWidget {

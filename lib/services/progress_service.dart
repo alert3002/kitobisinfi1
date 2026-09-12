@@ -8,6 +8,7 @@ class ProgressService {
 
   static const _lastBookKey = 'last_book_id';
   static const _lastInterstitialKey = 'last_interstitial_at';
+  static const _nightKey = 'reader_night_mode';
   SharedPreferences? _prefs;
 
   Future<void> init() async {
@@ -24,6 +25,57 @@ class ProgressService {
   }
 
   String? get lastBookId => _prefs?.getString(_lastBookKey);
+
+  int pageCountFor(String bookId) => _prefs?.getInt('pagecount_$bookId') ?? 0;
+
+  Future<void> savePageCount(String bookId, int count) async {
+    if (count < 1) return;
+    await _prefs?.setInt('pagecount_$bookId', count);
+  }
+
+  double percentFor(String bookId) {
+    final total = pageCountFor(bookId);
+    if (total < 1) return 0;
+    return (pageFor(bookId) / total).clamp(0, 1);
+  }
+
+  bool isFavorite(String bookId) => _prefs?.getBool('fav_$bookId') ?? false;
+
+  Future<void> toggleFavorite(String bookId) async {
+    await _prefs?.setBool('fav_$bookId', !isFavorite(bookId));
+  }
+
+  List<int> bookmarksFor(String bookId) {
+    final raw = _prefs?.getStringList('bookmarks_$bookId') ?? const [];
+    final pages = raw.map(int.tryParse).whereType<int>().toSet().toList()
+      ..sort();
+    return pages;
+  }
+
+  bool isBookmarked(String bookId, int page) =>
+      bookmarksFor(bookId).contains(page);
+
+  Future<void> toggleBookmark(String bookId, int page) async {
+    final pages = bookmarksFor(bookId).toSet();
+    if (!pages.add(page)) pages.remove(page);
+    final sorted = pages.toList()..sort();
+    await _prefs?.setStringList(
+      'bookmarks_$bookId',
+      sorted.map((p) => '$p').toList(),
+    );
+  }
+
+  String noteFor(String bookId) => _prefs?.getString('note_$bookId') ?? '';
+
+  Future<void> saveNote(String bookId, String note) async {
+    await _prefs?.setString('note_$bookId', note.trim());
+  }
+
+  bool get nightMode => _prefs?.getBool(_nightKey) ?? false;
+
+  Future<void> setNightMode(bool value) async {
+    await _prefs?.setBool(_nightKey, value);
+  }
 
   DateTime? get lastInterstitialAt {
     final raw = _prefs?.getInt(_lastInterstitialKey);

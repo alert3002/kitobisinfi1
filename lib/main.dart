@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -10,15 +12,31 @@ import 'theme/app_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await SystemChrome.setPreferredOrientations([
-    DeviceOrientation.portraitUp,
-    DeviceOrientation.landscapeLeft,
-    DeviceOrientation.landscapeRight,
-  ]);
-  await ProgressService.instance.init();
-  await AdsService.instance.init();
-  await PushService.instance.init();
+  try {
+    await SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
+  } catch (_) {}
+  try {
+    await ProgressService.instance.init();
+  } catch (_) {}
   runApp(const KitobhoApp());
+  unawaited(_initAfterLaunch());
+}
+
+Future<void> _initAfterLaunch() async {
+  try {
+    await AdsService.instance.init();
+  } catch (e, st) {
+    debugPrint('Ads init after launch: $e\n$st');
+  }
+  try {
+    await PushService.instance.init();
+  } catch (e, st) {
+    debugPrint('Push init after launch: $e\n$st');
+  }
 }
 
 class KitobhoApp extends StatelessWidget {

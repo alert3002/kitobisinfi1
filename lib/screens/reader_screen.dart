@@ -39,6 +39,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
   Timer? _debounce;
   bool _showSearch = false;
   bool _ready = false;
+  bool _night = ProgressService.instance.nightMode;
   int _page = 1;
   int _pageCount = 1;
   late final PdfDocumentRef _pdfRef;
@@ -103,6 +104,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
       _page = (controller.pageNumber ?? saved).clamp(1, count);
       _ready = true;
     });
+    unawaited(ProgressService.instance.savePageCount(widget.book.id, count));
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _fitWidth();
@@ -177,6 +179,87 @@ class _ReaderScreenState extends State<ReaderScreen> {
     await searcher.goToPrevMatch();
   }
 
+  Future<void> _toggleNight() async {
+    final next = !_night;
+    await ProgressService.instance.setNightMode(next);
+    if (mounted) setState(() => _night = next);
+  }
+
+  Future<void> _toggleBookmark() async {
+    await ProgressService.instance.toggleBookmark(widget.book.id, _page);
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _showBookmarks() async {
+    final pages = ProgressService.instance.bookmarksFor(widget.book.id);
+    if (!mounted) return;
+    if (pages.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Ҳанӯз хатчӯб нест. Нишони хатчӯбро пахш кунед.')),
+      );
+      return;
+    }
+    final picked = await showModalBottomSheet<int>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) {
+        return ListView(
+          children: [
+            const ListTile(
+              title: Text(
+                'Хатчӯбҳо',
+                style: TextStyle(fontWeight: FontWeight.w800),
+              ),
+            ),
+            for (final page in pages)
+              ListTile(
+                leading: const Icon(Icons.bookmark_rounded),
+                title: Text('Саҳифаи $page'),
+                onTap: () => Navigator.pop(ctx, page),
+              ),
+          ],
+        );
+      },
+    );
+    if (picked == null || !_pdfController.isReady) return;
+    await _pdfController.goToPage(pageNumber: picked.clamp(1, _pageCount));
+  }
+
+  Future<void> _editNote() async {
+    final input = TextEditingController(
+      text: ProgressService.instance.noteFor(widget.book.id),
+    );
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Ёддошти китоб'),
+        content: TextField(
+          controller: input,
+          maxLines: 6,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: 'Масалан: саҳ. 12 — машқи хонагӣ',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Бекор'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Сабт'),
+          ),
+        ],
+      ),
+    );
+    if (saved == true) {
+      await ProgressService.instance.saveNote(widget.book.id, input.text);
+      if (mounted) setState(() {});
+    }
+    input.dispose();
+  }
+
   Future<void> _jumpDialog() async {
     if (!_pdfController.isReady) return;
     final input = TextEditingController(text: '$_page');
@@ -219,8 +302,13 @@ class _ReaderScreenState extends State<ReaderScreen> {
     final matchIndex = searcher?.currentIndex ?? 0;
     final searching = _searchController.text.trim().isNotEmpty;
 
+    final paper = _night ? const Color(0xFF1A1A1A) : const Color(0xFFEEE6D6);
+    final pdfBg = _night ? const Color(0xFF111111) : const Color(0xFFF3EEE4);
+    final bookmarked =
+        ProgressService.instance.isBookmarked(widget.book.id, _page);
+
     return Scaffold(
-      backgroundColor: const Color(0xFFEEE6D6),
+      backgroundColor: paper,
       body: Column(
         children: [
           const BannerAdSlot(),
@@ -229,9 +317,15 @@ class _ReaderScreenState extends State<ReaderScreen> {
             page: _page,
             pageCount: _pageCount,
             searching: _showSearch,
+            bookmarked: bookmarked,
+            night: _night,
             onBack: () => Navigator.pop(context),
             onZoomOut: _ready ? _zoomOut : null,
             onZoomIn: _ready ? _zoomIn : null,
+            onBookmark: _ready ? _toggleBookmark : null,
+            onBookmarks: _showBookmarks,
+            onNote: _editNote,
+            onNight: _toggleNight,
             onSearch: () {
               setState(() {
                 _showSearch = !_showSearch;
@@ -261,7 +355,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
               controller: _pdfController,
               params: PdfViewerParams(
                 margin: 2,
-                backgroundColor: const Color(0xFFF3EEE4),
+                backgroundColor: pdfBg,
                 pageDropShadow: const BoxShadow(
                   color: Color(0x33000000),
                   blurRadius: 6,
@@ -366,22 +460,34 @@ class _TopBar extends StatelessWidget {
     required this.page,
     required this.pageCount,
     required this.searching,
+    required this.bookmarked,
+    required this.night,
     required this.onBack,
     required this.onSearch,
     required this.onJump,
     required this.onZoomOut,
     required this.onZoomIn,
+    required this.onBookmark,
+    required this.onBookmarks,
+    required this.onNote,
+    required this.onNight,
   });
 
   final String title;
   final int page;
   final int pageCount;
   final bool searching;
+  final bool bookmarked;
+  final bool night;
   final VoidCallback onBack;
   final VoidCallback onSearch;
   final VoidCallback? onJump;
   final VoidCallback? onZoomOut;
   final VoidCallback? onZoomIn;
+  final VoidCallback? onBookmark;
+  final VoidCallback onBookmarks;
+  final VoidCallback onNote;
+  final VoidCallback onNight;
 
   @override
   Widget build(BuildContext context) {
@@ -411,6 +517,44 @@ class _TopBar extends StatelessWidget {
                     fontSize: 14,
                   ),
                 ),
+              ),
+              IconButton(
+                tooltip: 'Хатчӯб',
+                onPressed: onBookmark,
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 36),
+                icon: Icon(
+                  bookmarked
+                      ? Icons.bookmark_rounded
+                      : Icons.bookmark_border_rounded,
+                  color: bookmarked ? const Color(0xFFE9C46A) : Colors.white,
+                  size: 20,
+                ),
+              ),
+              PopupMenuButton<String>(
+                tooltip: 'Бештар',
+                color: Colors.white,
+                onSelected: (value) {
+                  if (value == 'marks') onBookmarks();
+                  if (value == 'note') onNote();
+                  if (value == 'night') onNight();
+                },
+                itemBuilder: (context) => [
+                  const PopupMenuItem(
+                    value: 'marks',
+                    child: Text('Хатчӯбҳо'),
+                  ),
+                  const PopupMenuItem(
+                    value: 'note',
+                    child: Text('Ёддошт'),
+                  ),
+                  PopupMenuItem(
+                    value: 'night',
+                    child: Text(night ? 'Реҷаи рӯз' : 'Реҷаи шаб'),
+                  ),
+                ],
+                icon: const Icon(Icons.more_vert_rounded, color: Colors.white, size: 20),
               ),
               IconButton(
                 tooltip: 'Хурд',
